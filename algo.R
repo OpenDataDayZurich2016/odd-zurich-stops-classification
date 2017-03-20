@@ -1,10 +1,11 @@
+# clear environment
 rm(list=ls())
 
-#====================================
-# Simulate or load data
-#====================================
+#===================================================
+# Simulate data, in case real data is not available
+#===================================================
 
-#  Simulate, until there is real data
+#  Simulate
 
 # n = 5
 # m = 10
@@ -22,53 +23,55 @@ rm(list=ls())
 # locations['type'] <- sample(1:3,nrow(locations), replace=T)
 # locations
 
-#  Read
-
+#===================================================
+# Read data
+#===================================================
 library(RCurl)
 
 # Landmarks with given classes ('type'). We limited ourselves for three of them
 x <- getURL("https://raw.githubusercontent.com/OpenDataDayZurich2016/odd-zurich-stops-classification/master/data-examples/overpass_classes.csv")
-locations <- read.csv(text = x)
-names(locations) <- c('x','y','type')
-head(locations)
+landmarks <- read.csv(text = x)
+names(landmarks) <- c('lat','lon','type')
+head(landmarks)
 
 # Bus stops 
 x <- getURL("https://raw.githubusercontent.com/OpenDataDayZurich2016/odd-zurich-stops-classification/master/data-examples/haltestellen_coordinates.csv")
 busStops <- read.csv(text = x)
-names(busStops) <- c('x','y')
+names(busStops) <- c('lat','lon')
 head(busStops)
 
-busStops <- busStops[sample(1:nrow(busStops),3),]
-busStops
+#busStops <- busStops[sample(1:nrow(busStops),5),]
+#busStops
 
-# We know there are just 3 classes for now
+# We know there are just 3 classes
 cols3 <- c('steelblue4','springgreen4','yellow')
 
-cols_locs <- ifelse(locations$type==1,cols3[1],ifelse(locations$type==2,cols3[2],cols3[3]))
+cols_locs <- ifelse(landmarks$type==1,cols3[1],ifelse(landmarks$type==2,cols3[2],cols3[3]))
 
 #====================================
 # Plot raw data
 #====================================
-# # extent
-box  <- data.frame(x=c(47.3726,47.3806), y=c(8.5272,8.5490))
+# find extent
+box  <- data.frame(lon=c(min(landmarks$lon,busStops$lon),max(landmarks$lon,busStops$lon)), 
+                   lat=c(min(landmarks$lat,busStops$lat),max(landmarks$lat,busStops$lat)))
 plot(box)
-points(busStops, col=rgb(0,0,0), pch=8, cex=1)
-points(locations, col=cols_locs, pch=16, cex=1)
+points(busStops$lon,busStops$lat, col=rgb(0,0,0), pch=8, cex=1)
+points(landmarks$lon, landmarks$lat, col=cols_locs, pch=16, cex=1)
 
 #====================================
 # Compute travel time by walking
 #====================================
 require("gmapsdistance")
 
-#dist_mat[i,j] - walking time from bus stop i to landmark j
-dist_mat <- matrix(data = NA, nrow = nrow(busStops), ncol = nrow(locations))
+# dist_mat[i,j] - walking time from bus stop i to landmark j
+dist_mat <- matrix(data = NA, nrow = nrow(busStops), ncol = nrow(landmarks))
 
 # THIS SHOULD NOT BE DONE MANUALLY
 for (i in 1:nrow(busStops)){
-  for (j in 1:nrow(locations)){
-    or <- paste(busStops$x[i],busStops$y[i], sep='+')
-    des <- paste(locations$x[j],locations$y[j], sep='+')
-    results = gmapsdistance(origin = or, destination = des, mode = "walking")
+  for (j in 1:nrow(landmarks)){
+    origin <- paste(busStops$lat[i],busStops$lon[i], sep='+')
+    destination <- paste(landmarks$lat[j],landmarks$lon[j], sep='+')
+    results = gmapsdistance(origin = origin, destination = destination, mode = "walking")
     results
     dist_mat[i,j] <- results$Time
   }
@@ -83,7 +86,7 @@ dist_mat_type <- matrix(data = 0, nrow = nrow(busStops), ncol = 3)
 
 for (i in 1:dim(dist_mat)[1]){
   for (type in 1:3){
-    dist_mat_type[i,type] <- sum(dist_mat_inv[i, which(locations$type==type)])
+    dist_mat_type[i,type] <- sum(dist_mat_inv[i, which(landmarks$type==type)])
   }
 }
 
@@ -99,34 +102,55 @@ dmat
 #====================================
 # Visualize result
 #====================================
- plot(box)
- points(locations, col=cols_locs, pch=16, cex=1)
 
-# One way to visualize - blend colors, Bad idea - it all looks grey!
- require(scales)
- points(busStops-0.0001, col=alpha(cols3[1], dmat[,1]), pch=18, cex=5)
- points(busStops, col=alpha(cols3[2], dmat[,2]), pch=18, cex=5)
- points(busStops+0.0001, col=alpha(cols3[3], dmat[,3]), pch=18, cex=5)
- points(busStops, col=rgb(0,0,0), pch=8, cex=1)
+#====================================
+# Attempt 1 : pie charts
+#====================================
+plot(box)
+points(landmarks$lon, landmarks$lat, col=cols_locs, pch=16, cex=1)
+require(mapplots)
+for (i in 1:dim(dmat)[1]){
+  lon <- busStops$lon[i]
+  lat <- busStops$lat[i]
+  z <- dmat[i,]
+  r <- (max(box$lon)-min(box$lon))/60
+  # add pie chart 
+  add.pie(z=z, x=lon, y=lat, col=cols3, labels=NA, radius=r)
+}
 
-# Another visualization solution: plot pie charts instead of blending colors.
-# Does not work so well. Is it us or is it the package being strange?
-# require(caroline)
-# col.tab <- nv(cols3, paste('type',unique(locations$type), sep=''))
-# # THIS IS VERY BAD IMPLEMENTATION, BUT WE HAVE 4mins LEFT
-# pie.list <- list(
-#   st1=nv(dmat[1,],c('type1','type2','type3')),
-#   st2=nv(dmat[2,],c('type1','type2','type3')),
-#   st3=nv(dmat[3,],c('type1','type2','type3')))
-# 
-# dev.off()
-# plot(box)
-# pies(x=pie.list, 
-#      x0=busStops$x[1:3], 
-#      y0=busStops$y[1:3], 
-#      radii=5, 
-#      show.labels=F, 
-#      show.slice.labels=F, 
-#      color.table=col.tab)
-# Hmmmm..... somethng went wrong here, the weighting should be
+#====================================
+# Attempt 2 : mixing colrors
+#====================================
+plot(box)
+points(landmarks$lon, landmarks$lat, col=cols_locs, pch=16, cex=1)
+require(scales)
+points(busStops$lon-0.0001, busStops$lat-0.0001, col=alpha(cols3[1], dmat[,1]), pch=18, cex=5)
+points(busStops$lon,busStops$lat, col=alpha(cols3[2], dmat[,2]), pch=18, cex=5)
+points(busStops$lon+0.0001, busStops$lat+0.0001,  col=alpha(cols3[3], dmat[,3]), pch=18, cex=5)
+points(busStops$lon,busStops$lat, col=rgb(0,0,0), pch=8, cex=1)
 
+#====================================
+# Attempt 3 : overlay pie charts with google maps
+#====================================
+# devtools::install_github("dkahle/ggmap")
+# devtools::install_github("hadley/ggplot2")
+
+
+library(ggplot2) 
+library(scatterpie) 
+# world <- map_data('Zurich') 
+# p <- ggplot(world, aes(long, lat)) + 
+#      geom_map(map=world, aes(map_id=region), fill=NA, color="black") + 
+#      coord_quickmap() 
+# p + geom_scatterpie(aes(x=long, y=lat, group=region, r=radius), data=d, cols=LETTERS[1:4], color=NA, alpha=.8) + 
+#     geom_scatterpie_legend(d$radius, x=-160, y=-55) 
+
+
+ZH <- get_map("Zurich,Switzerland", zoom=16)
+p <- ggmap(ZH, alpha=0.5)
+d <- data.frame(lat=busStops$lat,lon=busStops$lon)
+d1 <- cbind(d, dmat)
+p + geom_scatterpie(aes(x=lon, y=lat), data=d1, cols=c("1", "2", "3"), 
+                    color=NA, alpha=.8)
+  
+ 
